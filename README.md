@@ -67,13 +67,19 @@ python src/main.py --once   # one test run
    cron line.
 3. Edit `.env` with your Telegram credentials (`nano .env`).
 4. Test once: `./venv/bin/python src/main.py --once`
-5. Add the cron job with `crontab -e`, e.g. every 10 minutes:
-   ```cron
-   */10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
+5. (optional) Make cron times local + DST-correct:
+   ```bash
+   sudo timedatectl set-timezone America/Los_Angeles && sudo systemctl restart cron
    ```
-   Change `*/10` to `*/5`, `*/2`, etc. to check more often. `flock` prevents a
-   slow run from overlapping the next one.
-6. Watch it: `tail -f cron.log`
+6. Add the cron jobs with `crontab -e`:
+   ```cron
+   # check every 10 minutes (change */10 to */5, */2, etc.)
+   */10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
+   # weekly fresh list: wipe state Wed 6pm (box timezone) and re-check
+   0 18 * * 3 rm -f /root/permit-watcher/state.json && /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
+   ```
+   `flock` prevents overlapping runs; the weekly wipe re-sends the full current list.
+7. Watch it: `tail -f cron.log`
 
 ## Configuration
 

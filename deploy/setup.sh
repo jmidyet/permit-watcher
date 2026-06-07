@@ -28,8 +28,11 @@ if [ ! -f .env ]; then
 fi
 
 PY="$REPO_DIR/venv/bin/python"
+LOCK="/usr/bin/flock -n /tmp/permit-watcher.lock"
 # flock ensures a slow run never overlaps the next scheduled one.
-CRON_LINE="*/10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock $PY $REPO_DIR/src/main.py --once >> $REPO_DIR/cron.log 2>&1"
+CRON_LINE="*/10 * * * * $LOCK $PY $REPO_DIR/src/main.py --once >> $REPO_DIR/cron.log 2>&1"
+# Weekly: wipe state so the full current list is re-sent (Wed 6pm box time).
+WIPE_LINE="0 18 * * 3 rm -f $REPO_DIR/state.json && $LOCK $PY $REPO_DIR/src/main.py --once >> $REPO_DIR/cron.log 2>&1"
 
 cat <<EOF
 
@@ -38,11 +41,15 @@ cat <<EOF
 Next steps:
   1. Edit your secrets:        nano $REPO_DIR/.env
   2. Find your chat id:        $PY utils/get_telegram_chat_id.py
-  3. Test one run:             cd $REPO_DIR && $PY src/main.py --once
-  4. Add the cron job:         crontab -e   (then paste the line below)
+  3. Test one run:             $PY $REPO_DIR/src/main.py --once
+  4. (optional) make cron times local + DST-correct:
+       sudo timedatectl set-timezone America/Los_Angeles && sudo systemctl restart cron
+  5. Add cron jobs:            crontab -e   (paste both lines below)
 
-     # check every 10 minutes (change */10 to */5, */2, etc. as you like)
+     # check every 10 minutes (change */10 to */5, */2, etc.)
      $CRON_LINE
+     # weekly fresh list: wipe state Wed 6pm (box timezone) and re-check
+     $WIPE_LINE
 
 To watch it work:  tail -f $REPO_DIR/cron.log
 EOF
