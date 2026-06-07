@@ -1,6 +1,6 @@
-# setuptools provides pkg_resources, which apscheduler 3.10 imports and which
-# Python 3.12 venvs no longer include by default.
-setuptools>=68
+# apscheduler 3.10 imports pkg_resources, which Python 3.12 venvs omit and which
+# setuptools 81+ removed. Pin below 81 so pkg_resources is available.
+setuptools<81
 requests==2.31.0
 pyyaml==6.0.2
 python-dotenv==1.0.0
