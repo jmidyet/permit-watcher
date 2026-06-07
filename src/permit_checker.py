@@ -26,6 +26,7 @@ import json
 import logging
 import random
 import time
+from datetime import date as Date
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -40,6 +41,34 @@ _FALLBACK_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+
+def _date_iso(value):
+    if isinstance(value, Date):
+        return value.isoformat()
+    return str(value)[:10]
+
+
+def format_permit_date(value):
+    """Format a permit date for alert messages, e.g. Friday, 8/14/26."""
+    if isinstance(value, Date):
+        d = value
+    else:
+        d = datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    return f"{d.strftime('%A')}, {d.month}/{d.day}/{d.strftime('%y')}"
+
+
+def format_permit_dates(values, new_dates=None):
+    """Return formatted dates, marking dates present in new_dates as NEW."""
+    new_date_set = {_date_iso(d) for d in (new_dates or [])}
+    return [
+        f"{format_permit_date(value)}{' (NEW)' if _date_iso(value) in new_date_set else ''}"
+        for value in values
+    ]
+
+
+def _date_bullets(values, new_dates=None):
+    return "\n".join(f"- {d}" for d in format_permit_dates(values, new_dates))
 
 
 class PermitChecker:
@@ -75,8 +104,8 @@ class PermitChecker:
         self.jitter = request_config.get('jitter', 0.2)
         self.timeout = request_config.get('timeout', 30)
 
-        # Map of "permitid_divisionid" -> {dates: [...], notified_at: iso}, used
-        # to only alert on newly-appeared dates. Loaded from disk if available.
+        # Map of "permitid_divisionid" -> state for current and already-alerted
+        # dates. Loaded from disk if available.
         self.found_availabilities = self._load_state()
 
         # Reuse a session for connection pooling.
@@ -120,7 +149,15 @@ class PermitChecker:
     def _load_state(self):
         """Load the already-notified map from disk; return {} if unavailable.
 
-        Maps "permitid_divisionid" -> {"dates": [...], "notified_at": iso}.
+        Maps "permitid_divisionid" -> {
+            "current_dates": [...],
+            "alerted_dates": [...],
+            "notified_at": iso,
+            "checked_at": iso,
+        }.
+
+        Older state files used {"dates": [...], "notified_at": iso}; those are
+        normalized lazily when each segment is checked.
         """
         if not self.state_path or not self.state_path.exists():
             return {}
@@ -143,6 +180,13 @@ class PermitChecker:
             self.state_path.write_text(json.dumps(self.found_availabilities, indent=2))
         except OSError as e:
             logger.warning(f"Could not write state file {self.state_path}: {e}")
+
+    @staticmethod
+    def _state_dates(entry, field):
+        values = entry.get(field, [])
+        if not isinstance(values, list):
+            return []
+        return [_date_iso(value) for value in values]
 
     def _check_permit(self, permit):
         """Check one permit and alert (on newly-appeared dates) per open segment."""
@@ -406,20 +450,35 @@ class PermitChecker:
         seg = permit.get('division_names', {}).get(str(division_id), str(division_id))
         key = f"{permit_id}_{division_id}"
 
-        # Nothing open now: forget prior state so a future reopening re-alerts.
-        if not open_dates:
-            self.found_availabilities.pop(key, None)
-            return
-
         current = [d.isoformat() for d in open_dates]
-        previously_notified = set(self.found_availabilities.get(key, {}).get('dates', []))
-        new_dates = [d for d in current if d not in previously_notified]
+        prior_entry = self.found_availabilities.get(key, {})
+        if not isinstance(prior_entry, dict):
+            prior_entry = {}
 
-        # Always remember the latest open set so dedup stays accurate.
+        # Backward compatibility: old state used "dates" for both current and
+        # already-notified dates.
+        alerted_dates = set(self._state_dates(prior_entry, 'alerted_dates'))
+        if not alerted_dates:
+            alerted_dates.update(self._state_dates(prior_entry, 'dates'))
+
+        new_dates = [d for d in current if d not in alerted_dates]
+        now = datetime.now().isoformat()
+
+        # Always remember the latest open set. Keep alerted_dates even when a
+        # segment temporarily goes empty so API flicker/reopenings do not repeat
+        # the same date until state.json is intentionally wiped.
+        alerted_dates.update(new_dates)
         self.found_availabilities[key] = {
-            'dates': current,
-            'notified_at': datetime.now().isoformat(),
+            'current_dates': current,
+            'alerted_dates': sorted(alerted_dates),
+            'notified_at': now if new_dates else prior_entry.get('notified_at'),
+            'checked_at': now,
         }
+        self._save_state()
+
+        if not open_dates:
+            logger.info(f"{permit_name} / {seg}: no open dates; keeping alert history.")
+            return
 
         if not new_dates:
             logger.info(
@@ -438,7 +497,10 @@ class PermitChecker:
             message=(
                 f"{permit_name}\n"
                 f"Segment: {seg}\n"
-                f"Open date(s) [{len(current)}]: {', '.join(current)}\n"
+                f"New date(s) [{len(new_dates)}]:\n"
+                f"{_date_bullets(new_dates)}\n"
+                f"All currently open [{len(current)}]:\n"
+                f"{_date_bullets(current, new_dates)}\n"
                 f"Party size: {people}\n"
                 f"Book now: https://www.recreation.gov/permits/{permit_id}"
             ),
