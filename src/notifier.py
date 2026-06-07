@@ -6,6 +6,7 @@ Supports email and SMS notifications.
 import logging
 import smtplib
 import os
+from html import escape
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -40,13 +41,23 @@ class Notifier:
 
         logger.info("Notifier initialized")
     
-    def send_notification(self, subject, message):
+    def send_notification(
+        self,
+        subject,
+        message,
+        telegram_message=None,
+        telegram_parse_mode=None,
+        telegram_reply_markup=None,
+    ):
         """
         Send a notification using all enabled notification methods.
         
         Args:
             subject (str): Subject or title of the notification.
             message (str): Content of the notification.
+            telegram_message (str, optional): Telegram-specific body.
+            telegram_parse_mode (str, optional): Telegram parse mode, e.g. HTML.
+            telegram_reply_markup (dict, optional): Telegram reply markup.
         """
         logger.info(f"Sending notification: {subject}")
         
@@ -55,7 +66,12 @@ class Notifier:
 
         # Send Telegram message if enabled
         if self.telegram_enabled:
-            self._send_telegram(subject, message)
+            self._send_telegram(
+                subject,
+                telegram_message or message,
+                parse_mode=telegram_parse_mode,
+                reply_markup=telegram_reply_markup,
+            )
 
         # Send email if enabled
         if self.email_enabled:
@@ -65,11 +81,19 @@ class Notifier:
         if self.sms_enabled:
             self._send_sms(message)
     
-    def _send_telegram(self, subject, message):
+    def _send_telegram(self, subject, message, parse_mode=None, reply_markup=None):
         """Send a formatted alert to the configured Telegram chat."""
-        self.send_telegram_raw(f"\U0001F3D5 {subject}\n\n{message}")
+        if parse_mode == "HTML":
+            text = f"\U0001F3D5 <b>{escape(subject)}</b>\n\n{message}"
+        else:
+            text = f"\U0001F3D5 {subject}\n\n{message}"
+        self.send_telegram_raw(
+            text,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup,
+        )
 
-    def send_telegram_raw(self, text):
+    def send_telegram_raw(self, text, parse_mode=None, reply_markup=None):
         """
         Send a raw text message to the configured Telegram chat. Returns True on
         success. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars.
@@ -84,9 +108,19 @@ class Notifier:
                 )
                 return False
 
+            payload = {
+                'chat_id': chat_id,
+                'text': text,
+                'disable_web_page_preview': False,
+            }
+            if parse_mode:
+                payload['parse_mode'] = parse_mode
+            if reply_markup:
+                payload['reply_markup'] = reply_markup
+
             response = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={'chat_id': chat_id, 'text': text, 'disable_web_page_preview': False},
+                json=payload,
                 timeout=15,
             )
 

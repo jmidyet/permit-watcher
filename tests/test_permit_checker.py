@@ -8,8 +8,8 @@ class StubNotifier:
     def __init__(self):
         self.messages = []
 
-    def send_notification(self, subject, message):
-        self.messages.append((subject, message))
+    def send_notification(self, subject, message, **kwargs):
+        self.messages.append((subject, message, kwargs))
 
 
 def _checker(tmp_path, state=None):
@@ -55,9 +55,13 @@ def test_notification_marks_new_dates_and_formats_all_open_dates(tmp_path):
 
     assert len(notifier.messages) == 1
     message = notifier.messages[0][1]
+    telegram_kwargs = notifier.messages[0][2]
     assert "New date(s) [1]:\n- Saturday, 6/13/26" in message
     assert "- Saturday, 6/13/26 (NEW)" in message
     assert "- Saturday, 7/25/26" in message
+    assert telegram_kwargs["telegram_parse_mode"] == "HTML"
+    assert "<b>New dates [1]</b>" in telegram_kwargs["telegram_message"]
+    assert "inline_keyboard" in telegram_kwargs["telegram_reply_markup"]
 
     state = json.loads(state_path.read_text())
     assert state["250014_371"]["current_dates"] == ["2026-06-13", "2026-07-25"]

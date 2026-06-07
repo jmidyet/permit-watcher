@@ -28,6 +28,7 @@ import random
 import time
 from datetime import date as Date
 from datetime import datetime, timedelta
+from html import escape
 from pathlib import Path
 
 import requests
@@ -69,6 +70,29 @@ def format_permit_dates(values, new_dates=None):
 
 def _date_bullets(values, new_dates=None):
     return "\n".join(f"- {d}" for d in format_permit_dates(values, new_dates))
+
+
+def _date_html_bullets(values, new_dates=None):
+    new_date_set = {_date_iso(d) for d in (new_dates or [])}
+    lines = []
+    for value in values:
+        label = escape(format_permit_date(value))
+        if _date_iso(value) in new_date_set:
+            label = f"{label} <b>NEW</b>"
+        lines.append(f"\u2022 {label}")
+    return "\n".join(lines)
+
+
+def recreation_permit_url(permit_id):
+    return f"https://www.recreation.gov/permits/{permit_id}"
+
+
+def _booking_button(permit_id):
+    return {
+        "inline_keyboard": [[
+            {"text": "Book on recreation.gov", "url": recreation_permit_url(permit_id)}
+        ]]
+    }
 
 
 class PermitChecker:
@@ -266,9 +290,8 @@ class PermitChecker:
 
     def collect_open_segments(self):
         """
-        Return [(permit_name, segment_label, [iso dates])] for every currently
-        open segment across all permits. Used for on-demand summaries; does not
-        touch notification state.
+        Return a dict per currently open segment across all permits. Used for
+        on-demand summaries; does not touch notification state.
         """
         results = []
         permits = self.permits_config.get('permits', {})
@@ -286,11 +309,13 @@ class PermitChecker:
                 names = permit.get('division_names', {})
                 for division_id, open_dates in segments:
                     if open_dates:
-                        results.append((
-                            permit.get('name', permit.get('id')),
-                            names.get(str(division_id), str(division_id)),
-                            [d.isoformat() for d in open_dates],
-                        ))
+                        results.append({
+                            'permit_name': permit.get('name', permit.get('id')),
+                            'permit_id': permit.get('id'),
+                            'segment': names.get(str(division_id), str(division_id)),
+                            'dates': [d.isoformat() for d in open_dates],
+                            'people': permit.get('people', 1),
+                        })
         return results
 
     def _resolve_window(self, permit):
@@ -488,22 +513,35 @@ class PermitChecker:
             return
 
         people = permit.get('people', 1)
+        plain_message = (
+            f"{permit_name}\n"
+            f"Segment: {seg}\n"
+            f"New date(s) [{len(new_dates)}]:\n"
+            f"{_date_bullets(new_dates)}\n"
+            f"All currently open [{len(current)}]:\n"
+            f"{_date_bullets(current, new_dates)}\n"
+            f"Party size: {people}\n"
+            f"Book now: {recreation_permit_url(permit_id)}"
+        )
+        telegram_message = (
+            f"<b>{escape(permit_name)}</b>\n"
+            f"<b>Segment:</b> {escape(seg)}\n\n"
+            f"<b>New dates [{len(new_dates)}]</b>\n"
+            f"{_date_html_bullets(new_dates)}\n\n"
+            f"<b>All open [{len(current)}]</b>\n"
+            f"{_date_html_bullets(current, new_dates)}\n\n"
+            f"<b>Party size:</b> {escape(str(people))}"
+        )
         logger.info(
             f"AVAILABLE: {permit_name} / {seg}: {len(new_dates)} new of "
             f"{len(current)} open date(s) -> notifying"
         )
         self.notifier.send_notification(
             subject=f"Permit Available: {permit_name} - {seg}",
-            message=(
-                f"{permit_name}\n"
-                f"Segment: {seg}\n"
-                f"New date(s) [{len(new_dates)}]:\n"
-                f"{_date_bullets(new_dates)}\n"
-                f"All currently open [{len(current)}]:\n"
-                f"{_date_bullets(current, new_dates)}\n"
-                f"Party size: {people}\n"
-                f"Book now: https://www.recreation.gov/permits/{permit_id}"
-            ),
+            message=plain_message,
+            telegram_message=telegram_message,
+            telegram_parse_mode="HTML",
+            telegram_reply_markup=_booking_button(permit_id),
         )
 
     def _get_request_headers(self):
