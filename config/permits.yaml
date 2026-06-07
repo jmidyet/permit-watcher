@@ -89,6 +89,10 @@ permits:
 
 # Advanced search options (apply to all permits)
 search_options:
+  # Ignore openings sooner than this many days out — you need lead time to plan
+  # and travel, so closer dates are just noise. 2 = ~48 hours. Tweak freely.
+  min_lead_days: 2
+
   # Widen the search a few days on either side of each permit's window.
   date_flexibility:
     enabled: false

@@ -175,13 +175,22 @@ class PermitChecker:
             str(d) for d in (permit.get('divisions') or [])
         }
 
-        # remaining must be at least this many to count as available.
-        min_remaining = int(permit.get('min_remaining', 1))
-
         # Recreation.gov exposes two different availability APIs. River/standard
         # permits use the "month" endpoint; Inyo and SEKI wilderness permits use
         # the "inyo" availabilityv2 endpoint with a different response shape.
         api_style = permit.get('api', 'month')
+
+        # How many open slots count as "available". The APIs count different
+        # things: the month API's `remaining` is launches/permits (one covers the
+        # whole group, so >=1 is enough), while the inyo API's `remaining` is a
+        # per-person quota, so a party needs at least `people` person-slots.
+        # Override either with an explicit min_remaining on the permit.
+        if permit.get('min_remaining') is not None:
+            min_remaining = int(permit['min_remaining'])
+        elif api_style == 'inyo':
+            min_remaining = int(permit.get('people', 1))
+        else:
+            min_remaining = 1
 
         # division_id -> {date(): remaining}
         availability = {}
@@ -223,11 +232,14 @@ class PermitChecker:
             start_date -= timedelta(days=int(flex.get('days_before', 0)))
             end_date += timedelta(days=int(flex.get('days_after', 0)))
 
-        # Never look at dates in the past — recreation.gov can still report
-        # leftover availability for elapsed dates, which we must ignore.
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        if start_date < today:
-            start_date = today
+        # Ignore dates in the past or too soon to act on — recreation.gov also
+        # reports stale availability for elapsed dates. min_lead_days adds the
+        # buffer you need to actually plan/travel (default 2 = ~48 hours).
+        lead_days = int(self.permits_config.get('search_options', {}).get('min_lead_days', 2))
+        earliest = (datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                    + timedelta(days=lead_days))
+        if start_date < earliest:
+            start_date = earliest
 
         if end_date < start_date:
             raise ValueError("end date precedes start date")
