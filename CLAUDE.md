@@ -15,6 +15,8 @@ fired by cron on a DigitalOcean droplet.
 - `src/notifier.py` — Telegram (+ optional email/SMS) sending.
 - `src/config_loader.py` — loads YAML + `.env`.
 - `src/scheduler.py` — APScheduler interval/time scheduler (only used without `--once`).
+- `src/telegram_listener.py` — `--telegram-poll` handler: reads a command from the
+  bot and replies with the current openings (manual run; ignores dedup state).
 - `config/permits.yaml` — which permits/segments/windows to watch.
 - `config/config.yaml` — request rate limits, notifications, scheduler, `state_file`.
 - `deploy/setup.sh` — one-time droplet setup; prints the cron lines.
@@ -87,9 +89,14 @@ System timezone is `America/Los_Angeles` (so cron times are Pacific, DST-aware).
 ```cron
 */10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
 0 18 * * 3 rm -f /root/permit-watcher/state.json && /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
+* * * * * /usr/bin/flock -n /tmp/permit-watcher-tg.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --telegram-poll >> /root/permit-watcher/cron.log 2>&1
 ```
-- `flock` prevents overlapping runs (a full pass takes ~1-2 min).
+- `flock` prevents overlapping runs (a full pass takes ~1-2 min). The Telegram
+  poll uses a separate lock so it doesn't serialize with the watcher.
 - Weekly line wipes state Wed 6pm Pacific, then re-checks → fresh full list.
+- Manual run: user messages the bot `/run` (or `/check`/`/status`); the
+  every-minute `--telegram-poll` replies with all current openings (ignores
+  state). Offset tracked in `telegram_offset.json` (gitignored).
 - Logs: `tail -f /root/permit-watcher/cron.log`. Inspect dedup: `cat state.json`.
 
 ## Quick ops

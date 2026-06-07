@@ -42,6 +42,11 @@ def main():
         action="store_true",
         help="Run a single check of all permits and exit (for cron/scheduled jobs).",
     )
+    parser.add_argument(
+        "--telegram-poll",
+        action="store_true",
+        help="Check Telegram for a manual-run command and reply (for cron).",
+    )
     args = parser.parse_args()
 
     logger.info("Starting Permit Watcher...")
@@ -55,6 +60,12 @@ def main():
     # Set log level from config
     log_level = getattr(logging, app_config.get('app', {}).get('log_level', 'INFO'))
     logger.setLevel(log_level)
+
+    # Telegram manual-run poll: check for a command, reply, and exit.
+    if args.telegram_poll:
+        from src.telegram_listener import poll_once
+        poll_once(app_config, permits_config, project_root / "telegram_offset.json")
+        return 0
 
     # Initialize components
     notifier = Notifier(app_config)

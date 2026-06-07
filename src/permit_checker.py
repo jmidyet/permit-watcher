@@ -145,24 +145,38 @@ class PermitChecker:
             logger.warning(f"Could not write state file {self.state_path}: {e}")
 
     def _check_permit(self, permit):
-        """
-        Check a single permit across its configured date window.
+        """Check one permit and alert (on newly-appeared dates) per open segment."""
+        segments = self._open_segments(permit)
+        if segments is None:
+            return
+        permit_name = permit.get('name', permit.get('id'))
+        found_any = False
+        for division_id, open_dates in segments:
+            if open_dates:
+                found_any = True
+            self._maybe_notify_segment(permit, division_id, open_dates)
+        if not found_any:
+            logger.info(f"No availability found for {permit_name} in the requested window.")
 
-        Args:
-            permit (dict): Permit configuration.
+    def _open_segments(self, permit):
+        """
+        Fetch availability for one permit and return a list of
+        (division_id, open_dates) for each watched division (open_dates may be
+        empty). Returns None if the permit is misconfigured or its window is
+        invalid/entirely in the past.
         """
         permit_id = permit.get('id')
         permit_name = permit.get('name', permit_id)
 
         if not permit_id:
             logger.warning(f"Skipping permit with no id: {permit_name}")
-            return
+            return None
 
         try:
             start_date, end_date = self._resolve_window(permit)
         except (TypeError, ValueError) as e:
-            logger.error(f"Invalid dates for permit {permit_name}: {e}")
-            return
+            logger.error(f"Invalid/elapsed window for permit {permit_name}: {e}")
+            return None
 
         logger.info(
             f"Checking permit: {permit_name} (ID: {permit_id}) "
@@ -171,9 +185,7 @@ class PermitChecker:
 
         # Optional division (entry/launch point) filter. Recreation.gov divisions
         # are identified by numeric ids; accept ints or strings.
-        wanted_divisions = {
-            str(d) for d in (permit.get('divisions') or [])
-        }
+        wanted_divisions = {str(d) for d in (permit.get('divisions') or [])}
 
         # Recreation.gov exposes two different availability APIs. River/standard
         # permits use the "month" endpoint; Inyo and SEKI wilderness permits use
@@ -194,32 +206,48 @@ class PermitChecker:
 
         # division_id -> {date(): remaining}
         availability = {}
-        months = self._months_in_range(start_date, end_date)
-        for i, month_start in enumerate(months):
+        for i, month_start in enumerate(self._months_in_range(start_date, end_date)):
             if i > 0:
                 self._add_random_delay()
             data = self._fetch_month(permit_id, month_start, api_style)
             self._merge_month(availability, data, start_date, end_date, api_style)
 
-        if not availability:
-            logger.info(f"No availability data returned for {permit_name}.")
-            return
-
-        # One message per segment (division) listing all its open dates, rather
-        # than one message per date. A single open date is all that's needed —
-        # one permit covers the whole trip.
-        found_any = False
+        segments = []
         for division_id, dates in availability.items():
             if wanted_divisions and division_id not in wanted_divisions:
                 continue
-
             open_dates = sorted(d for d, rem in dates.items() if rem >= min_remaining)
-            if open_dates:
-                found_any = True
-            self._maybe_notify_segment(permit, division_id, open_dates)
+            segments.append((division_id, open_dates))
+        return segments
 
-        if not found_any:
-            logger.info(f"No availability found for {permit_name} in the requested window.")
+    def collect_open_segments(self):
+        """
+        Return [(permit_name, segment_label, [iso dates])] for every currently
+        open segment across all permits. Used for on-demand summaries; does not
+        touch notification state.
+        """
+        results = []
+        permits = self.permits_config.get('permits', {})
+        groups = [permits] if isinstance(permits, list) else permits.values()
+
+        first = True
+        for group in groups:
+            for permit in group or []:
+                if not first:
+                    self._add_random_delay()
+                first = False
+                segments = self._open_segments(permit)
+                if not segments:
+                    continue
+                names = permit.get('division_names', {})
+                for division_id, open_dates in segments:
+                    if open_dates:
+                        results.append((
+                            permit.get('name', permit.get('id')),
+                            names.get(str(division_id), str(division_id)),
+                            [d.isoformat() for d in open_dates],
+                        ))
+        return results
 
     def _resolve_window(self, permit):
         """Return (start_date, end_date) applying configured date flexibility."""

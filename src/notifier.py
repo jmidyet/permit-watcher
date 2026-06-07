@@ -66,10 +66,13 @@ class Notifier:
             self._send_sms(message)
     
     def _send_telegram(self, subject, message):
-        """
-        Send a Telegram message via the Bot API.
+        """Send a formatted alert to the configured Telegram chat."""
+        self.send_telegram_raw(f"\U0001F3D5 {subject}\n\n{message}")
 
-        Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables.
+    def send_telegram_raw(self, text):
+        """
+        Send a raw text message to the configured Telegram chat. Returns True on
+        success. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars.
         """
         try:
             token = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -79,9 +82,8 @@ class Notifier:
                 logger.error(
                     "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID environment variables"
                 )
-                return
+                return False
 
-            text = f"\U0001F3D5 {subject}\n\n{message}"
             response = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json={'chat_id': chat_id, 'text': text, 'disable_web_page_preview': False},
@@ -89,14 +91,14 @@ class Notifier:
             )
 
             if response.status_code == 200:
-                logger.info("Telegram notification sent")
-            else:
-                logger.error(
-                    f"Telegram send failed {response.status_code}: {response.text[:200]}"
-                )
+                logger.info("Telegram message sent")
+                return True
+            logger.error(f"Telegram send failed {response.status_code}: {response.text[:200]}")
+            return False
 
         except Exception as e:
-            logger.error(f"Failed to send Telegram notification: {e}", exc_info=True)
+            logger.error(f"Failed to send Telegram message: {e}", exc_info=True)
+            return False
 
     def _send_email(self, subject, message):
         """

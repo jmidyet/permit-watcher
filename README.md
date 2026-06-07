@@ -77,9 +77,17 @@ python src/main.py --once   # one test run
    */10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
    # weekly fresh list: wipe state Wed 6pm (box timezone) and re-check
    0 18 * * 3 rm -f /root/permit-watcher/state.json && /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
+   # answer manual-run requests sent to the Telegram bot (every minute)
+   * * * * * /usr/bin/flock -n /tmp/permit-watcher-tg.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --telegram-poll >> /root/permit-watcher/cron.log 2>&1
    ```
    `flock` prevents overlapping runs; the weekly wipe re-sends the full current list.
 7. Watch it: `tail -f cron.log`
+
+## Manual run from Telegram
+
+Message your bot **`/run`** (or `/check` / `/status`). Within a minute the
+every-minute poll picks it up and replies with **all** currently-open segments —
+ignoring the dedup state, so you see the full list on demand, not just what's new.
 
 ## Configuration
 

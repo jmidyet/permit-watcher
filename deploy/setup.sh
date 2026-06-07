@@ -29,10 +29,13 @@ fi
 
 PY="$REPO_DIR/venv/bin/python"
 LOCK="/usr/bin/flock -n /tmp/permit-watcher.lock"
+TGLOCK="/usr/bin/flock -n /tmp/permit-watcher-tg.lock"
 # flock ensures a slow run never overlaps the next scheduled one.
 CRON_LINE="*/10 * * * * $LOCK $PY $REPO_DIR/src/main.py --once >> $REPO_DIR/cron.log 2>&1"
 # Weekly: wipe state so the full current list is re-sent (Wed 6pm box time).
 WIPE_LINE="0 18 * * 3 rm -f $REPO_DIR/state.json && $LOCK $PY $REPO_DIR/src/main.py --once >> $REPO_DIR/cron.log 2>&1"
+# Every minute: answer manual-run commands sent to the Telegram bot.
+POLL_LINE="* * * * * $TGLOCK $PY $REPO_DIR/src/main.py --telegram-poll >> $REPO_DIR/cron.log 2>&1"
 
 cat <<EOF
 
@@ -44,12 +47,15 @@ Next steps:
   3. Test one run:             $PY $REPO_DIR/src/main.py --once
   4. (optional) make cron times local + DST-correct:
        sudo timedatectl set-timezone America/Los_Angeles && sudo systemctl restart cron
-  5. Add cron jobs:            crontab -e   (paste both lines below)
+  5. Add cron jobs:            crontab -e   (paste all three lines below)
 
      # check every 10 minutes (change */10 to */5, */2, etc.)
      $CRON_LINE
      # weekly fresh list: wipe state Wed 6pm (box timezone) and re-check
      $WIPE_LINE
+     # answer manual-run requests you send to the Telegram bot (every minute)
+     $POLL_LINE
 
+Manual run: message your bot "/run" — it replies with all current openings.
 To watch it work:  tail -f $REPO_DIR/cron.log
 EOF
