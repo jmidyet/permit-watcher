@@ -75,8 +75,8 @@ class PermitChecker:
         self.jitter = request_config.get('jitter', 0.2)
         self.timeout = request_config.get('timeout', 30)
 
-        # Map of "permit/division/date" -> last-notified datetime, used with the
-        # cooldown to avoid duplicate alerts. Loaded from disk if available.
+        # Map of "permitid_divisionid" -> {dates: [...], notified_at: iso}, used
+        # to only alert on newly-appeared dates. Loaded from disk if available.
         self.found_availabilities = self._load_state()
 
         # Reuse a session for connection pooling.
@@ -118,12 +118,18 @@ class PermitChecker:
         self._save_state()
 
     def _load_state(self):
-        """Load the already-notified map from disk; return {} if unavailable."""
+        """Load the already-notified map from disk; return {} if unavailable.
+
+        Maps "permitid_divisionid" -> {"dates": [...], "notified_at": iso}.
+        """
         if not self.state_path or not self.state_path.exists():
             return {}
         try:
-            raw = json.loads(self.state_path.read_text())
-            return {k: datetime.fromisoformat(v) for k, v in raw.items()}
+            data = json.loads(self.state_path.read_text())
+            if not isinstance(data, dict):
+                return {}
+            # Keep only entries in the current schema; drop legacy/foreign ones.
+            return {k: v for k, v in data.items() if isinstance(v, dict)}
         except (ValueError, OSError) as e:
             logger.warning(f"Could not read state file {self.state_path}: {e}")
             return {}
@@ -133,9 +139,8 @@ class PermitChecker:
         if not self.state_path:
             return
         try:
-            serializable = {k: v.isoformat() for k, v in self.found_availabilities.items()}
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            self.state_path.write_text(json.dumps(serializable, indent=2))
+            self.state_path.write_text(json.dumps(self.found_availabilities, indent=2))
         except OSError as e:
             logger.warning(f"Could not write state file {self.state_path}: {e}")
 
@@ -191,17 +196,18 @@ class PermitChecker:
             logger.info(f"No availability data returned for {permit_name}.")
             return
 
-        # A single open entry/launch date is all that's needed: one permit covers
-        # the whole trip. So alert on every open date in each watched division.
+        # One message per segment (division) listing all its open dates, rather
+        # than one message per date. A single open date is all that's needed —
+        # one permit covers the whole trip.
         found_any = False
         for division_id, dates in availability.items():
             if wanted_divisions and division_id not in wanted_divisions:
                 continue
 
-            for d in sorted(dates):
-                if dates[d] >= min_remaining:
-                    found_any = True
-                    self._maybe_notify(permit, division_id, d, dates[d])
+            open_dates = sorted(d for d, rem in dates.items() if rem >= min_remaining)
+            if open_dates:
+                found_any = True
+            self._maybe_notify_segment(permit, division_id, open_dates)
 
         if not found_any:
             logger.info(f"No availability found for {permit_name} in the requested window.")
@@ -216,6 +222,12 @@ class PermitChecker:
         if flex.get('enabled', False):
             start_date -= timedelta(days=int(flex.get('days_before', 0)))
             end_date += timedelta(days=int(flex.get('days_after', 0)))
+
+        # Never look at dates in the past — recreation.gov can still report
+        # leftover availability for elapsed dates, which we must ignore.
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        if start_date < today:
+            start_date = today
 
         if end_date < start_date:
             raise ValueError("end date precedes start date")
@@ -338,32 +350,59 @@ class PermitChecker:
                 quota = info.get('quota_usage_by_member_daily', {}) or {}
                 availability.setdefault(str(division_id), {})[d] = int(quota.get('remaining', 0))
 
-    def _maybe_notify(self, permit, division_id, date, remaining):
-        """Send a notification for an open entry/launch date, respecting cooldown."""
+    def _maybe_notify_segment(self, permit, division_id, open_dates):
+        """
+        Send one message per segment listing all open dates, but only when a
+        date appears that we haven't already alerted on (so a frequent cron run
+        doesn't re-send the same opening every time).
+
+        Args:
+            permit (dict): Permit configuration.
+            division_id (str): The division/segment id.
+            open_dates (list[date]): Open dates within the window, ascending.
+        """
         permit_id = permit.get('id')
         permit_name = permit.get('name', permit_id)
-        people = permit.get('people', 1)
+        seg = permit.get('division_names', {}).get(str(division_id), str(division_id))
+        key = f"{permit_id}_{division_id}"
 
-        when = date.isoformat()
-        permit_key = f"{permit_id}_{division_id}_{when}"
-        cooldown_hours = self.app_config.get('notification', {}).get('cooldown', 24)
-        last = self.found_availabilities.get(permit_key)
-        if last and (datetime.now() - last).total_seconds() < cooldown_hours * 3600:
-            logger.info(f"Skipping notification for {permit_name} ({when}); within cooldown.")
+        # Nothing open now: forget prior state so a future reopening re-alerts.
+        if not open_dates:
+            self.found_availabilities.pop(key, None)
             return
 
-        logger.info(f"AVAILABLE: {permit_name} division {division_id} {when} (remaining {remaining})")
+        current = [d.isoformat() for d in open_dates]
+        previously_notified = set(self.found_availabilities.get(key, {}).get('dates', []))
+        new_dates = [d for d in current if d not in previously_notified]
+
+        # Always remember the latest open set so dedup stays accurate.
+        self.found_availabilities[key] = {
+            'dates': current,
+            'notified_at': datetime.now().isoformat(),
+        }
+
+        if not new_dates:
+            logger.info(
+                f"{permit_name} / {seg}: {len(current)} open date(s), none new since "
+                f"last alert; skipping."
+            )
+            return
+
+        people = permit.get('people', 1)
+        logger.info(
+            f"AVAILABLE: {permit_name} / {seg}: {len(new_dates)} new of "
+            f"{len(current)} open date(s) -> notifying"
+        )
         self.notifier.send_notification(
-            subject=f"Permit Available: {permit_name}",
+            subject=f"Permit Available: {permit_name} - {seg}",
             message=(
                 f"{permit_name}\n"
-                f"Dates: {when}\n"
-                f"Entry/division: {division_id}\n"
-                f"Spots remaining: {remaining} (party size {people})\n"
+                f"Segment: {seg}\n"
+                f"Open date(s) [{len(current)}]: {', '.join(current)}\n"
+                f"Party size: {people}\n"
                 f"Book now: https://www.recreation.gov/permits/{permit_id}"
             ),
         )
-        self.found_availabilities[permit_key] = datetime.now()
 
     def _get_request_headers(self):
         """Request headers, with an optional random user agent."""

@@ -28,7 +28,8 @@ if [ ! -f .env ]; then
 fi
 
 PY="$REPO_DIR/venv/bin/python"
-CRON_LINE="*/10 * * * * cd $REPO_DIR && $PY src/main.py --once >> $REPO_DIR/cron.log 2>&1"
+# flock ensures a slow run never overlaps the next scheduled one.
+CRON_LINE="*/10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock $PY $REPO_DIR/src/main.py --once >> $REPO_DIR/cron.log 2>&1"
 
 cat <<EOF
 

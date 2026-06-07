@@ -69,9 +69,10 @@ python src/main.py --once   # one test run
 4. Test once: `./venv/bin/python src/main.py --once`
 5. Add the cron job with `crontab -e`, e.g. every 10 minutes:
    ```cron
-   */10 * * * * cd /root/permit-watcher && /root/permit-watcher/venv/bin/python src/main.py --once >> /root/permit-watcher/cron.log 2>&1
+   */10 * * * * /usr/bin/flock -n /tmp/permit-watcher.lock /root/permit-watcher/venv/bin/python /root/permit-watcher/src/main.py --once >> /root/permit-watcher/cron.log 2>&1
    ```
-   Change `*/10` to `*/5`, `*/2`, etc. to check more often.
+   Change `*/10` to `*/5`, `*/2`, etc. to check more often. `flock` prevents a
+   slow run from overlapping the next one.
 6. Watch it: `tail -f cron.log`
 
 ## Configuration

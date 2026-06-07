@@ -26,6 +26,8 @@ permits:
       people: 4
       divisions:
         - "282"   # Desolation-Gray Canyons of the Green River (Sand Wash launch)
+      division_names:
+        "282": "Desolation/Gray Canyons - Green River (Sand Wash)"
 
     - name: "Dinosaur - Gates of Lodore (Green River)"
       id: "250014"
@@ -37,6 +39,8 @@ permits:
       people: 6
       divisions:
         - "380"   # Gates of Lodore, Green River
+      division_names:
+        "380": "Gates of Lodore - Green River"
 
     - name: "Dinosaur - Yampa River"
       id: "250014"
@@ -48,6 +52,8 @@ permits:
       people: 6
       divisions:
         - "371"   # Deerlodge Park, Yampa River
+      division_names:
+        "371": "Deerlodge Park - Yampa River"
       # Note: the Yampa is snowmelt-dependent and is usually only runnable
       # ~May-mid-July; later dates rarely have water but cost nothing to watch.
 
@@ -63,6 +69,8 @@ permits:
       people: 2
       divisions:
         - "495"   # Big Pine Creek North Fork
+      division_names:
+        "495": "Big Pine Creek - North Fork"
 
     - name: "Rae Lakes Loop (Woods Creek / Bubbs Creek)"
       id: "445857"
@@ -75,6 +83,9 @@ permits:
       divisions:
         - "44585703"   # Woods Creek
         - "44585704"   # Bubbs Creek
+      division_names:
+        "44585703": "Rae Lakes Loop - Woods Creek"
+        "44585704": "Rae Lakes Loop - Bubbs Creek"
 
 # Advanced search options (apply to all permits)
 search_options:
