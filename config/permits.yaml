@@ -1,0 +1,85 @@
+# Permits to monitor on recreation.gov.
+#
+# Each permit needs:
+#   name        - human label used in notifications
+#   id          - recreation.gov permit id (the {id} in /permits/{id})
+#   api         - "month" (rivers / standard permits) or "inyo" (Inyo & SEKI
+#                 wilderness permits, which use the /permitinyo availabilityv2 API)
+#   dates       - start/end of the window you care about (YYYY-MM-DD)
+#   people      - your party size (shown in the alert)
+#   divisions   - OPTIONAL list of numeric division ids to watch. Omit to watch
+#                 every division (entry point / launch / trailhead) on the permit.
+#   min_remaining - OPTIONAL minimum open spots to trigger an alert (default 1)
+#
+# Division ids were resolved from the live API on 2026-06-06.
+
+permits:
+  # ---- River permits (standard /availability/month API) ----
+  rivers:
+    - name: "Desolation / Gray Canyon - Green River"
+      id: "233393"
+      api: "month"
+      type: "river"
+      dates:
+        start: "2026-06-01"
+        end: "2026-09-15"
+      people: 4
+      divisions:
+        - "282"   # Desolation-Gray Canyons of the Green River (Sand Wash launch)
+
+    - name: "Dinosaur - Gates of Lodore (Green River)"
+      id: "250014"
+      api: "month"
+      type: "river"
+      dates:
+        start: "2026-05-15"
+        end: "2026-09-15"
+      people: 6
+      divisions:
+        - "380"   # Gates of Lodore, Green River
+
+    - name: "Dinosaur - Yampa River"
+      id: "250014"
+      api: "month"
+      type: "river"
+      dates:
+        start: "2026-05-01"
+        end: "2026-08-15"
+      people: 6
+      divisions:
+        - "371"   # Deerlodge Park, Yampa River
+      # Note: the Yampa is snowmelt-dependent and is usually only runnable
+      # ~May-mid-July; later dates rarely have water but cost nothing to watch.
+
+  # ---- Overnight backpacking permits (Inyo / SEKI availabilityv2 API) ----
+  backpacking:
+    - name: "Big Pine Creek - North Fork (overnight)"
+      id: "233262"
+      api: "inyo"
+      type: "trail"
+      dates:
+        start: "2026-07-01"
+        end: "2026-09-30"
+      people: 2
+      divisions:
+        - "495"   # Big Pine Creek North Fork
+
+    - name: "Rae Lakes Loop (Woods Creek / Bubbs Creek)"
+      id: "445857"
+      api: "inyo"
+      type: "trail"
+      dates:
+        start: "2026-07-01"
+        end: "2026-09-26"
+      people: 2
+      divisions:
+        - "44585703"   # Woods Creek
+        - "44585704"   # Bubbs Creek
+
+# Advanced search options (apply to all permits)
+search_options:
+  # Widen the search a few days on either side of each permit's window.
+  date_flexibility:
+    enabled: false
+    days_before: 2
+    days_after: 2

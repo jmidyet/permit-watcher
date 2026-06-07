@@ -1,0 +1,7 @@
+requests==2.31.0
+pyyaml==6.0
+python-dotenv==1.0.0
+tenacity==8.2.2
+fake-useragent==1.5.1
+apscheduler==3.10.1
+pytest==7.4.2

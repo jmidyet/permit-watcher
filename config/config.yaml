@@ -1,0 +1,69 @@
+# General application settings
+app:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: INFO
+  # Base URL for recreation.gov API
+  base_url: "https://www.recreation.gov/api"
+  # User agent randomization (true/false)
+  randomize_user_agent: true
+  # File (relative to project root) used to remember which openings were already
+  # alerted, so cron `--once` runs don't re-notify every time.
+  state_file: "state.json"
+
+# Request settings
+request:
+  # Delay between requests in seconds (min and max for randomization)
+  delay:
+    min: 10
+    max: 30
+  # Add jitter to delay (percentage)
+  jitter: 0.2
+  # Maximum number of retries for failed requests
+  max_retries: 3
+  # Backoff factor for retries (exponential backoff)
+  backoff_factor: 2
+  # Timeout for requests in seconds
+  timeout: 30
+
+# Notification settings
+notification:
+  # Enable/disable notification methods
+  # Telegram needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars (see .env).
+  telegram: true
+  email: false
+  sms: false
+  # How often to send notifications for the same permit (in hours)
+  # Set to 0 to notify every time an opening is found
+  cooldown: 24
+  
+  # Email notification settings
+  email_settings:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    # Use environment variables for sensitive information
+    # SMTP_USERNAME and SMTP_PASSWORD should be set in .env file
+    from_address: "${SMTP_USERNAME}"
+    to_addresses:
+      - "jmidyet@gmail.com"
+    
+  # SMS notification settings (if enabled)
+  sms_settings:
+    # Use environment variables for Twilio credentials
+    # Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env file
+    to_numbers:
+      - "+1234567890"
+
+# Scheduler settings
+scheduler:
+  # Run checks at specific times of day (24-hour format).
+  # Leave empty to use interval-based scheduling instead (recommended for a
+  # cancellation watcher — you want to check frequently).
+  scheduled_times: []
+
+  # Interval-based scheduling, in minutes. This is your check frequency; lower
+  # it to catch cancellations faster. A full pass over all permits takes ~1-2
+  # min because of the polite delays between requests, so keep this >= ~5.
+  interval: 15
+
+  # Add randomness to the interval (in minutes) to avoid a robotic pattern.
+  random_offset: 3
