@@ -42,21 +42,6 @@ permits:
       division_names:
         "380": "Gates of Lodore - Green River"
 
-    - name: "Dinosaur - Yampa River"
-      id: "250014"
-      api: "month"
-      type: "river"
-      dates:
-        start: "2026-05-01"
-        end: "2026-08-15"
-      people: 6
-      divisions:
-        - "371"   # Deerlodge Park, Yampa River
-      division_names:
-        "371": "Deerlodge Park - Yampa River"
-      # Note: the Yampa is snowmelt-dependent and is usually only runnable
-      # ~May-mid-July; later dates rarely have water but cost nothing to watch.
-
   # ---- Overnight backpacking permits (Inyo / SEKI availabilityv2 API) ----
   backpacking:
     - name: "Big Pine Creek - North Fork (overnight)"
