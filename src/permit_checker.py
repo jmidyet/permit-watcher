@@ -59,24 +59,42 @@ def format_permit_date(value):
     return f"{d.strftime('%A')}, {d.month}/{d.day}/{d.strftime('%y')}"
 
 
-def format_permit_dates(values, new_dates=None):
-    """Return formatted dates, marking dates present in new_dates as NEW."""
+def _remaining_label(value, remaining_by_date):
+    """" (N available)" suffix for a date, or "" when the count is unknown."""
+    if not remaining_by_date:
+        return ""
+    rem = remaining_by_date.get(_date_iso(value))
+    if rem is None:
+        return ""
+    return f" ({rem} available)"
+
+
+def format_permit_dates(values, new_dates=None, remaining_by_date=None):
+    """Return formatted dates, annotating spots remaining and marking NEW dates."""
     new_date_set = {_date_iso(d) for d in (new_dates or [])}
-    return [
-        f"{format_permit_date(value)}{' (NEW)' if _date_iso(value) in new_date_set else ''}"
-        for value in values
-    ]
+    out = []
+    for value in values:
+        label = f"{format_permit_date(value)}{_remaining_label(value, remaining_by_date)}"
+        if _date_iso(value) in new_date_set:
+            label = f"{label} (NEW)"
+        out.append(label)
+    return out
 
 
-def _date_bullets(values, new_dates=None):
-    return "\n".join(f"- {d}" for d in format_permit_dates(values, new_dates))
+def _date_bullets(values, new_dates=None, remaining_by_date=None):
+    return "\n".join(
+        f"- {d}" for d in format_permit_dates(values, new_dates, remaining_by_date)
+    )
 
 
-def _date_html_bullets(values, new_dates=None):
+def _date_html_bullets(values, new_dates=None, remaining_by_date=None):
     new_date_set = {_date_iso(d) for d in (new_dates or [])}
     lines = []
     for value in values:
         label = escape(format_permit_date(value))
+        rem = (remaining_by_date or {}).get(_date_iso(value))
+        if rem is not None:
+            label = f"{label} ({escape(str(rem))} available)"
         if _date_iso(value) in new_date_set:
             label = f"{label} <b>NEW</b>"
         lines.append(f"\u2022 {label}")
@@ -229,9 +247,11 @@ class PermitChecker:
     def _open_segments(self, permit):
         """
         Fetch availability for one permit and return a list of
-        (division_id, open_dates) for each watched division (open_dates may be
-        empty). Returns None if the permit is misconfigured or its window is
-        invalid/entirely in the past.
+        (division_id, open_dates) for each watched division, where open_dates is
+        a list of (date, remaining) tuples ascending by date (may be empty).
+        `remaining` is the count the API reports for that date (launches/permits
+        for the month API, per-person spots for the inyo API). Returns None if
+        the permit is misconfigured or its window is invalid/entirely in the past.
         """
         permit_id = permit.get('id')
         permit_name = permit.get('name', permit_id)
@@ -284,7 +304,9 @@ class PermitChecker:
         for division_id, dates in availability.items():
             if wanted_divisions and division_id not in wanted_divisions:
                 continue
-            open_dates = sorted(d for d, rem in dates.items() if rem >= min_remaining)
+            open_dates = sorted(
+                (d, rem) for d, rem in dates.items() if rem >= min_remaining
+            )
             segments.append((division_id, open_dates))
         return segments
 
@@ -313,7 +335,8 @@ class PermitChecker:
                             'permit_name': permit.get('name', permit.get('id')),
                             'permit_id': permit.get('id'),
                             'segment': names.get(str(division_id), str(division_id)),
-                            'dates': [d.isoformat() for d in open_dates],
+                            'dates': [d.isoformat() for d, _ in open_dates],
+                            'remaining': {d.isoformat(): rem for d, rem in open_dates},
                             'people': permit.get('people', 1),
                         })
         return results
@@ -468,14 +491,16 @@ class PermitChecker:
         Args:
             permit (dict): Permit configuration.
             division_id (str): The division/segment id.
-            open_dates (list[date]): Open dates within the window, ascending.
+            open_dates (list[tuple[date, int]]): (date, remaining) pairs for the
+                open dates within the window, ascending by date.
         """
         permit_id = permit.get('id')
         permit_name = permit.get('name', permit_id)
         seg = permit.get('division_names', {}).get(str(division_id), str(division_id))
         key = f"{permit_id}_{division_id}"
 
-        current = [d.isoformat() for d in open_dates]
+        current = [d.isoformat() for d, _ in open_dates]
+        remaining_by_date = {d.isoformat(): rem for d, rem in open_dates}
         prior_entry = self.found_availabilities.get(key, {})
         if not isinstance(prior_entry, dict):
             prior_entry = {}
@@ -517,9 +542,9 @@ class PermitChecker:
             f"{permit_name}\n"
             f"Segment: {seg}\n"
             f"New date(s) [{len(new_dates)}]:\n"
-            f"{_date_bullets(new_dates)}\n"
+            f"{_date_bullets(new_dates, remaining_by_date=remaining_by_date)}\n"
             f"All currently open [{len(current)}]:\n"
-            f"{_date_bullets(current, new_dates)}\n"
+            f"{_date_bullets(current, new_dates, remaining_by_date)}\n"
             f"Party size: {people}\n"
             f"Book now: {recreation_permit_url(permit_id)}"
         )
@@ -527,9 +552,9 @@ class PermitChecker:
             f"<b>{escape(permit_name)}</b>\n"
             f"<b>Segment:</b> {escape(seg)}\n\n"
             f"<b>New dates [{len(new_dates)}]</b>\n"
-            f"{_date_html_bullets(new_dates)}\n\n"
+            f"{_date_html_bullets(new_dates, remaining_by_date=remaining_by_date)}\n\n"
             f"<b>All open [{len(current)}]</b>\n"
-            f"{_date_html_bullets(current, new_dates)}\n\n"
+            f"{_date_html_bullets(current, new_dates, remaining_by_date)}\n\n"
             f"<b>Party size:</b> {escape(str(people))}"
         )
         logger.info(

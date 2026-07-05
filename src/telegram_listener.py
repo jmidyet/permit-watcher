@@ -124,6 +124,7 @@ def _format_summary(open_segments):
         permit_name = segment["permit_name"]
         segment_name = segment["segment"]
         dates = segment["dates"]
+        remaining = segment.get("remaining", {})
         people = segment.get("people", 1)
         permit_id = segment.get("permit_id")
         lines.extend([
@@ -131,7 +132,7 @@ def _format_summary(open_segments):
             f"<b>{escape(permit_name)}</b>",
             f"<i>{escape(segment_name)}</i>",
             f"Party size: {escape(str(people))}",
-            _format_date_chips(dates),
+            _format_date_chips(dates, remaining),
         ])
         if permit_id:
             url = escape(recreation_permit_url(permit_id), quote=True)
@@ -139,8 +140,16 @@ def _format_summary(open_segments):
     return "\n".join(lines)
 
 
-def _format_date_chips(dates):
-    return " ".join(f"<code>{escape(_compact_date(d))}</code>" for d in dates)
+def _format_date_chips(dates, remaining=None):
+    remaining = remaining or {}
+    chips = []
+    for d in dates:
+        label = _compact_date(d)
+        rem = remaining.get(d)
+        if rem is not None:
+            label = f"{label} ({rem})"
+        chips.append(f"<code>{escape(label)}</code>")
+    return " ".join(chips)
 
 
 def _compact_date(value):
